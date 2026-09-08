@@ -3,14 +3,14 @@
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: "Segoe UI", sans-serif;
+  --font-mono: "Cascadia Code", Consolas, monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
 }
 
 /* Ensure all form inputs are always visible regardless of system theme */
@@ -29,18 +29,24 @@ textarea::placeholder {
 
 /* Custom animations for background elements */
 @keyframes float {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: translateY(0px) rotate(0deg);
   }
+
   50% {
     transform: translateY(-20px) rotate(5deg);
   }
 }
 
 @keyframes pulse-slow {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 0.4;
   }
+
   50% {
     opacity: 0.8;
   }
@@ -50,6 +56,7 @@ textarea::placeholder {
   from {
     transform: rotate(0deg);
   }
+
   to {
     transform: rotate(360deg);
   }

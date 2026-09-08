@@ -4,6 +4,7 @@ import DashboardShell from '@/components/layout/DashboardShell'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Card from '@/components/ui/Card'
+import { authService } from '@/services/authService'
 import { getCurrentProfile, updateProfile, ProfileData, isAdmin, isEmployee } from '@/services/profileService'
 import { useEffect, useState } from 'react'
 
@@ -47,11 +48,11 @@ export default function ProfilePage() {
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!profile) return
-    
+
     setSaving(true)
     setError('')
     setSuccess('')
-    
+
     try {
       const payload = {
         fullName: form.fullName.trim(),
@@ -67,10 +68,10 @@ export default function ProfilePage() {
         const saved = localStorage.getItem('user')
         if (saved) {
           const userData = JSON.parse(saved)
-          const updated = { 
-            ...userData, 
-            fullName: updatedProfile.fullName, 
-            phone: updatedProfile.phone 
+          const updated = {
+            ...userData,
+            fullName: updatedProfile.fullName,
+            phone: updatedProfile.phone
           }
           localStorage.setItem('user', JSON.stringify(updated))
         }
@@ -84,6 +85,10 @@ export default function ProfilePage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  const onLogout = () => {
+    authService.logout()
   }
 
   const formatUserType = (userType: string, role: string) => {
@@ -102,24 +107,32 @@ export default function ProfilePage() {
           {/* Header Section */}
           <div className="mb-10">
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
-              <div className="flex items-center space-x-4">
-                <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full flex items-center justify-center">
+              <div className="flex items-center justify-between gap-6">
+                <div className="flex items-center space-x-4">
+                  <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full flex items-center justify-center">
                     <span className="text-white text-3xl font-bold">
-                    {profile?.fullName 
-                      ? profile.fullName
-                        .split(' ')
-                        .map(name => name.charAt(0).toUpperCase())
-                        .slice(0, 2)
-                        .join('')
-                      : ''}
+                      {profile?.fullName
+                        ? profile.fullName
+                          .split(' ')
+                          .map(name => name.charAt(0).toUpperCase())
+                          .slice(0, 2)
+                          .join('')
+                        : ''}
                     </span>
+                  </div>
+                  <div>
+                    <h1 className="text-4xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent">
+                      {profile?.fullName || ''}
+                    </h1>
+                    <p className="text-slate-600 text-lg mt-1">Manage your account information and preferences</p>
+                  </div>
                 </div>
-                <div>
-                  <h1 className="text-4xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent">
-                    {profile?.fullName || ''}
-                  </h1>
-                  <p className="text-slate-600 text-lg mt-1">Manage your account information and preferences</p>
-                </div>
+                <Button type="button" variant="destructive" onClick={onLogout} className="shrink-0">
+                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4m-5-4l5-5m0 0l-5-5m5 5H3" />
+                  </svg>
+                  Logout
+                </Button>
               </div>
             </div>
           </div>
@@ -145,7 +158,7 @@ export default function ProfilePage() {
                     </h3>
                     <p className="text-slate-300 mt-1">Your account details and organizational information</p>
                   </div>
-                  
+
                   <div className="p-8">
                     {profile && (
                       <div className="grid gap-8 sm:grid-cols-2">
@@ -159,7 +172,7 @@ export default function ProfilePage() {
                               <p className="text-blue-800 font-semibold">{formatUserType(profile.userType, profile.role)}</p>
                             </div>
                           </div>
-                          
+
                           <div className="group">
                             <label className="flex items-center text-sm font-semibold text-slate-700 mb-2">
                               <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
@@ -188,10 +201,10 @@ export default function ProfilePage() {
                               Member Since
                             </label>
                             <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
-                              <p className="text-amber-800 font-semibold">{new Date(profile.createdAt).toLocaleDateString('en-US', { 
-                                year: 'numeric', 
-                                month: 'long', 
-                                day: 'numeric' 
+                              <p className="text-amber-800 font-semibold">{new Date(profile.createdAt).toLocaleDateString('en-US', {
+                                year: 'numeric',
+                                month: 'long',
+                                day: 'numeric'
                               })}</p>
                             </div>
                           </div>
@@ -252,7 +265,7 @@ export default function ProfilePage() {
                     </h3>
                     <p className="text-green-100 mt-1">Edit your personal information</p>
                   </div>
-                  
+
                   <div className="p-8">
                     <form onSubmit={onSubmit} className="space-y-6">
                       {error && (
@@ -265,7 +278,7 @@ export default function ProfilePage() {
                           </div>
                         </div>
                       )}
-                      
+
                       {success && (
                         <div className="bg-green-50 border-l-4 border-green-400 rounded-r-lg p-4 shadow-sm">
                           <div className="flex items-center">
@@ -304,8 +317,8 @@ export default function ProfilePage() {
                       </div>
 
                       <div className="pt-4">
-                        <Button 
-                          type="submit" 
+                        <Button
+                          type="submit"
                           disabled={saving || !form.fullName.trim()}
                           className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold py-3 px-6 rounded-lg shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
                         >
