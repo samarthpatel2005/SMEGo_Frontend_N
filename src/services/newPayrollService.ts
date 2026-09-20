@@ -23,6 +23,7 @@ export interface Employee {
   salaryType: 'monthly' | 'hourly'
   hourlyRate?: number
   hireDate: string
+  salaryStructure?: SalaryStructure
 }
 
 export interface AttendanceSummary {
@@ -39,7 +40,7 @@ export interface AttendanceSummary {
 export interface PayrollData {
   employee: string
   organization: string
-  payrollPeriod: { month: number; year: number }
+  payrollPeriod: { month: number; year: number; startDate: string; endDate: string }
   salaryType: string
   baseSalary: number
   hourlyRate?: number
@@ -83,15 +84,36 @@ export interface PayrollData {
 export interface EmployeeWithPayroll {
   employee: Employee
   attendance: AttendanceSummary
-  payrollData: PayrollData
+  payrollData: PayrollData | null
   hasExistingPayroll: boolean
   existingPayrollId?: string
   payrollStatus: string
+  hasSalaryStructure: boolean
+}
+
+export interface PayrollPeriod {
+  year: number
+  month: number
+  startDate: string
+  endDate: string
+}
+
+export interface SalaryStructure {
+  salaryType: 'monthly' | 'hourly'
+  salary: number
+  hourlyRate: number
+  bonus: number
+  fixedDeduction: number
+  leaveDeductionPerDay: number
+  halfDayDeductionPerDay: number
+  effectiveFrom?: string
 }
 
 export interface GeneratePayrollRequest {
   year: number
   month: number
+  startDate?: string
+  endDate?: string
   employeeIds: string[]
 }
 
@@ -116,14 +138,32 @@ export interface PaymentResponse {
 }
 
 class NewPayrollService {
-  async getEmployeesForPayroll(year: number, month: number): Promise<{ 
-    success: boolean; 
-    data: { employees: EmployeeWithPayroll[]; period: { year: number; month: number } }; 
-    message?: string 
+  async updateSalaryStructure(employeeId: string, structure: SalaryStructure): Promise<{
+    success: boolean;
+    data: SalaryStructure;
+    message: string;
+  }> {
+    try {
+      const response = await axios.put(
+        `${API_BASE_URL}/payroll/structure/${employeeId}`,
+        structure,
+        { headers: createAuthHeaders() }
+      )
+      return response.data
+    } catch (error: any) {
+      console.error('Error saving salary structure:', error)
+      throw error.response?.data || error.message
+    }
+  }
+
+  async getEmployeesForPayroll(period: { year: number; month: number; startDate?: string; endDate?: string }): Promise<{
+    success: boolean;
+    data: { employees: EmployeeWithPayroll[]; period: PayrollPeriod };
+    message?: string
   }> {
     try {
       const response = await axios.get(`${API_BASE_URL}/payroll/employees`, {
-        params: { year, month },
+        params: period,
         headers: createAuthHeaders()
       })
       return response.data
