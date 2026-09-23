@@ -44,6 +44,11 @@ export interface PayrollData {
   salaryType: string
   baseSalary: number
   hourlyRate?: number
+  // Attendance-based breakdown
+  perDaySalary: number
+  effectiveDays: number
+  earnedBasicSalary: number
+  absentDeduction: number
   workingDays: {
     total: number
     present: number
@@ -74,6 +79,7 @@ export interface PayrollData {
     socialSecurity: number
     insurance: number
     leaveDeduction: number
+    absentDeduction: number
     lateDeduction: number
     other: number
     totalDeductions: number
@@ -137,6 +143,52 @@ export interface PaymentResponse {
   message?: string
 }
 
+export interface PayrollSummaryEmployee {
+  employee: {
+    _id: string
+    fullName: string
+    employeeId: string
+    department: string
+  }
+  monthlySalary: number
+  perDaySalary: number
+  totalDaysInPeriod: number
+  effectiveDays: number
+  presentDays: number
+  absentDays: number
+  halfDays: number
+  leaveDays: number
+  earnedSalary: number
+  absentDeduction: number
+  leaveDeduction: number
+  bonus: number
+  fixedDeduction: number
+  netPayable: number
+}
+
+export interface PayrollSummaryResponse {
+  success: boolean
+  data: {
+    period: {
+      year: number
+      month: number
+      startDate: string
+      endDate: string
+      totalDays: number
+    }
+    totals: {
+      totalPayable: number
+      totalAbsentDeduction: number
+      totalLeaveDeduction: number
+      totalBonus: number
+      totalPresentDays: number
+      totalAbsentDays: number
+      employeeCount: number
+    }
+    employees: PayrollSummaryEmployee[]
+  }
+}
+
 class NewPayrollService {
   async updateSalaryStructure(employeeId: string, structure: SalaryStructure): Promise<{
     success: boolean;
@@ -169,6 +221,19 @@ class NewPayrollService {
       return response.data
     } catch (error: any) {
       console.error('Error fetching employees for payroll:', error)
+      throw error.response?.data || error.message
+    }
+  }
+
+  async getPayrollSummary(period: { year: number; month: number; startDate?: string; endDate?: string }): Promise<PayrollSummaryResponse> {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/payroll/summary`, {
+        params: period,
+        headers: createAuthHeaders()
+      })
+      return response.data
+    } catch (error: any) {
+      console.error('Error fetching payroll summary:', error)
       throw error.response?.data || error.message
     }
   }
@@ -242,6 +307,25 @@ class NewPayrollService {
       return response.data
     } catch (error: any) {
       console.error('Error deleting payrolls:', error)
+      throw error.response?.data || error.message
+    }
+  }
+
+  async verifyPayrollPayment(data: {
+    payrollIds: string[]
+    razorpay_order_id: string
+    razorpay_payment_id: string
+    razorpay_signature: string
+  }): Promise<{ success: boolean; message: string; modifiedCount: number }> {
+    try {
+      const response = await axios.post(
+        `${API_BASE_URL}/payroll/verify-payment`,
+        data,
+        { headers: createAuthHeaders() }
+      )
+      return response.data
+    } catch (error: any) {
+      console.error('Error verifying payroll payment:', error)
       throw error.response?.data || error.message
     }
   }

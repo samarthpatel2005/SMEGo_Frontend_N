@@ -1,19 +1,14 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '@/hooks/useAuth'
-import Card from '@/components/ui/Card'
-import Button from '@/components/ui/Button'
-import Input from '@/components/ui/Input'
-import Select from '@/components/ui/Select'
 import { complaintService, type Complaint, type ComplaintStats } from '@/services/complaintService'
-import { 
-  MessageCircle, 
-  AlertCircle, 
-  Clock, 
-  CheckCircle, 
+import {
+  MessageCircle,
+  AlertCircle,
+  Clock,
+  CheckCircle,
   Search,
-  Filter,
   Eye,
   Phone,
   Mail,
@@ -21,890 +16,686 @@ import {
   User,
   FileText,
   MessageSquare,
-  Badge,
   Zap,
   TrendingUp,
-  ArrowUpRight,
-  ArrowDownRight,
-  RefreshCw
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight,
+  X,
+  Filter,
+  Tag,
+  Circle,
+  BarChart2,
+  ShieldCheck,
+  Inbox,
 } from 'lucide-react'
 import DashboardShell from '@/components/layout/DashboardShell'
 
-const statusColors = {
-  open: 'bg-gradient-to-r from-red-50 to-red-100 text-red-800 border-red-200 shadow-red-100',
-  'in-progress': 'bg-gradient-to-r from-yellow-50 to-yellow-100 text-yellow-800 border-yellow-200 shadow-yellow-100',
-  resolved: 'bg-gradient-to-r from-green-50 to-green-100 text-green-800 border-green-200 shadow-green-100',
-  closed: 'bg-gradient-to-r from-gray-50 to-gray-100 text-gray-800 border-gray-200 shadow-gray-100'
+// ─── Type helpers ─────────────────────────────────────────────────────────────
+type Status = 'open' | 'in-progress' | 'resolved' | 'closed'
+type Priority = 'low' | 'medium' | 'high' | 'urgent'
+
+// ─── Config maps ──────────────────────────────────────────────────────────────
+const STATUS_CFG: Record<Status, { label: string; dot: string; badge: string; icon: React.ReactNode }> = {
+  open:        { label: 'Open',        dot: 'bg-rose-500',   badge: 'bg-rose-50 text-rose-700 border-rose-200',    icon: <Circle className="w-3 h-3" /> },
+  'in-progress':{ label: 'In Progress', dot: 'bg-amber-400',  badge: 'bg-amber-50 text-amber-700 border-amber-200',  icon: <RefreshCw className="w-3 h-3 animate-spin" /> },
+  resolved:    { label: 'Resolved',    dot: 'bg-emerald-500',badge: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: <CheckCircle className="w-3 h-3" /> },
+  closed:      { label: 'Closed',      dot: 'bg-slate-400',  badge: 'bg-slate-50 text-slate-600 border-slate-200',  icon: <ShieldCheck className="w-3 h-3" /> },
 }
 
-const priorityColors = {
-  low: 'bg-gradient-to-r from-blue-50 to-blue-100 text-blue-800 shadow-blue-100',
-  medium: 'bg-gradient-to-r from-yellow-50 to-yellow-100 text-yellow-800 shadow-yellow-100',
-  high: 'bg-gradient-to-r from-orange-50 to-orange-100 text-orange-800 shadow-orange-100',
-  urgent: 'bg-gradient-to-r from-red-50 to-red-100 text-red-800 shadow-red-100'
+const PRIORITY_CFG: Record<Priority, { label: string; badge: string; dot: string }> = {
+  urgent: { label: 'Urgent', badge: 'bg-red-100 text-red-700 border-red-200',     dot: 'bg-red-500' },
+  high:   { label: 'High',   badge: 'bg-orange-100 text-orange-700 border-orange-200', dot: 'bg-orange-500' },
+  medium: { label: 'Medium', badge: 'bg-yellow-100 text-yellow-700 border-yellow-200', dot: 'bg-yellow-500' },
+  low:    { label: 'Low',    badge: 'bg-sky-100 text-sky-700 border-sky-200',      dot: 'bg-sky-400' },
 }
 
-const urgentPulse = 'animate-pulse ring-2 ring-red-300'
+// ─── Small atoms ──────────────────────────────────────────────────────────────
+function StatusBadge({ status }: { status: Status }) {
+  const c = STATUS_CFG[status] ?? STATUS_CFG.open
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${c.badge}`}>
+      {c.icon} {c.label}
+    </span>
+  )
+}
 
+function PriorityBadge({ priority }: { priority: Priority }) {
+  const c = PRIORITY_CFG[priority] ?? PRIORITY_CFG.low
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${c.badge} ${priority === 'urgent' ? 'animate-pulse' : ''}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
+      {c.label}
+    </span>
+  )
+}
+
+function Avatar({ name }: { name: string }) {
+  const initials = name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+  return (
+    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold shadow-md flex-shrink-0">
+      {initials}
+    </div>
+  )
+}
+
+// ─── KPI card ─────────────────────────────────────────────────────────────────
+function KpiCard({ icon, label, value, sub, colorClass, pulse }: {
+  icon: React.ReactNode; label: string; value: number; sub: string
+  colorClass: string; pulse?: boolean
+}) {
+  return (
+    <div className={`relative overflow-hidden bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all duration-300 group p-5 ${pulse ? 'ring-2 ring-red-200 ring-offset-1 animate-pulse' : ''}`}>
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1">{label}</p>
+          <p className={`text-3xl font-extrabold ${colorClass} group-hover:scale-105 transition-transform origin-left`}>{value}</p>
+          <p className="text-xs text-slate-400 mt-1">{sub}</p>
+        </div>
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${colorClass.replace('text-', 'bg-').replace('-700', '-100').replace('-600', '-100')} transition-all group-hover:scale-110`}>
+          {icon}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Filter pill ──────────────────────────────────────────────────────────────
+function FilterPill({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all duration-200 ${
+        active ? 'bg-violet-600 text-white border-violet-600 shadow-md shadow-violet-100' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300 hover:text-violet-600'
+      }`}
+    >
+      {label}
+    </button>
+  )
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
 export default function ComplaintsPage() {
   const { user } = useAuth()
   const [complaints, setComplaints] = useState<Complaint[]>([])
   const [stats, setStats] = useState<ComplaintStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedComplaint, setSelectedComplaint] = useState<Complaint | null>(null)
-  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [priorityFilter, setPriorityFilter] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [page, setPage] = useState(1)
+  const [pagination, setPagination] = useState({ currentPage: 1, totalPages: 1, totalCount: 0, hasNext: false, hasPrev: false })
+  const searchRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
-  // Filters
-  const [filters, setFilters] = useState({
-    search: '',
-    status: '',
-    priority: '',
-    category: '',
-    page: 1,
-    limit: 20
-  })
-
-  const [pagination, setPagination] = useState({
-    currentPage: 1,
-    totalPages: 1,
-    totalCount: 0,
-    hasNext: false,
-    hasPrev: false
-  })
-
-  useEffect(() => {
-    loadComplaints()
-    loadStats()
-  }, [filters])
-
-  const loadComplaints = async () => {
+  const loadComplaints = async (params: { search?: string; status?: string; priority?: string; category?: string; page?: number } = {}) => {
+    setLoading(true)
     try {
-      setLoading(true)
-      const response = await complaintService.getComplaints(filters)
-      if (response.success) {
-        setComplaints(response.data.complaints)
-        setPagination(response.data.pagination)
+      const res = await complaintService.getComplaints({ search, status: statusFilter, priority: priorityFilter, category: categoryFilter, page, limit: 15, ...params })
+      if (res.success) {
+        setComplaints(res.data.complaints)
+        setPagination(res.data.pagination)
       }
-    } catch (error) {
-      console.error('Error loading complaints:', error)
-    } finally {
-      setLoading(false)
-    }
+    } catch (e) { console.error(e) }
+    finally { setLoading(false) }
   }
 
   const loadStats = async () => {
     try {
-      console.log('Loading complaint stats...')
-      const response = await complaintService.getComplaintStats()
-      console.log('Stats response:', response)
-      if (response.success) {
-        console.log('Setting stats:', response.data)
-        setStats(response.data)
-      } else {
-        console.error('Stats request failed:', response.message)
-      }
-    } catch (error) {
-      console.error('Error loading complaint stats:', error)
-    }
+      const res = await complaintService.getComplaintStats()
+      if (res.success) setStats(res.data)
+    } catch (e) { console.error(e) }
   }
 
-  const handleFilterChange = (key: string, value: string) => {
-    setFilters(prev => ({
-      ...prev,
-      [key]: value,
-      page: 1 // Reset to first page when filtering
-    }))
-  }
+  useEffect(() => { loadComplaints(); loadStats() }, [statusFilter, priorityFilter, categoryFilter, page])
 
-  const handlePageChange = (page: number) => {
-    setFilters(prev => ({ ...prev, page }))
-  }
+  // Debounce search
+  useEffect(() => {
+    clearTimeout(searchRef.current)
+    searchRef.current = setTimeout(() => { setPage(1); loadComplaints({ search, page: 1 }) }, 400)
+    return () => clearTimeout(searchRef.current)
+  }, [search])
 
-  const openComplaintDetail = async (complaint: Complaint) => {
+  const openDetail = async (c: Complaint) => {
     try {
-      const response = await complaintService.getComplaintById(complaint._id)
-      if (response.success) {
-        setSelectedComplaint(response.data)
-        setIsDetailModalOpen(true)
-      }
-    } catch (error) {
-      console.error('Error loading complaint details:', error)
-    }
+      const res = await complaintService.getComplaintById(c._id)
+      if (res.success) setSelectedComplaint(res.data)
+    } catch (e) { console.error(e) }
   }
 
-  const updateComplaintStatus = async (complaintId: string, status: string, resolution?: string, note?: string) => {
+  const onUpdate = async (id: string, status: string, resolution?: string, note?: string) => {
     try {
-      const response = await complaintService.updateComplaint(complaintId, {
-        status,
-        resolution,
-        internalNote: note
-      })
-      
-      if (response.success) {
-        loadComplaints() // Refresh the list
-        if (selectedComplaint && selectedComplaint._id === complaintId) {
-          // Refresh the selected complaint details
-          const detailResponse = await complaintService.getComplaintById(complaintId)
-          if (detailResponse.success) {
-            setSelectedComplaint(detailResponse.data)
-          }
+      const res = await complaintService.updateComplaint(id, { status, resolution, internalNote: note })
+      if (res.success) {
+        loadComplaints()
+        loadStats()
+        if (selectedComplaint?._id === id) {
+          const dr = await complaintService.getComplaintById(id)
+          if (dr.success) setSelectedComplaint(dr.data)
         }
-        loadStats() // Refresh stats
       }
-    } catch (error) {
-      console.error('Error updating complaint:', error)
-    }
+    } catch (e) { console.error(e) }
   }
 
-  const statusOptions = [
-    { value: '', label: 'All Statuses' },
-    { value: 'open', label: 'Open' },
-    { value: 'in-progress', label: 'In Progress' },
-    { value: 'resolved', label: 'Resolved' },
-    { value: 'closed', label: 'Closed' }
-  ]
-
-  const priorityOptions = [
-    { value: '', label: 'All Priorities' },
-    { value: 'urgent', label: 'Urgent' },
-    { value: 'high', label: 'High' },
-    { value: 'medium', label: 'Medium' },
-    { value: 'low', label: 'Low' }
-  ]
-
-  const categoryOptions = [
-    { value: '', label: 'All Categories' },
-    { value: 'billing', label: 'Billing' },
-    { value: 'service', label: 'Service' },
-    { value: 'technical', label: 'Technical' },
-    { value: 'product', label: 'Product' },
-    { value: 'other', label: 'Other' }
-  ]
+  const clearFilters = () => { setSearch(''); setStatusFilter(''); setPriorityFilter(''); setCategoryFilter(''); setPage(1) }
+  const hasFilters = search || statusFilter || priorityFilter || categoryFilter
 
   return (
     <DashboardShell>
-    <div className="space-y-8 animate-fadeIn">
-      {/* Enhanced Header with Gradient */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 via-blue-700 to-purple-700 p-8 shadow-2xl">
-        <div className="absolute inset-0 bg-black opacity-10"></div>
-        <div className="absolute top-0 right-0 -mt-4 -mr-4 h-24 w-24 rounded-full bg-white opacity-10 animate-float"></div>
-        <div className="absolute bottom-0 left-0 -mb-8 -ml-8 h-32 w-32 rounded-full bg-white opacity-5 animate-float-delayed"></div>
-        <div className="relative flex items-center justify-between">
-          <div>
-            <h1 className="text-4xl font-bold text-white mb-2 drop-shadow-lg">Complaints Center</h1>
-            <p className="text-blue-100 text-lg">Streamline customer complaint management</p>
-            <div className="flex items-center mt-4 space-x-4">
-              <div className="flex items-center space-x-2 bg-white bg-opacity-20 rounded-full px-4 py-2">
-                <TrendingUp className="h-4 w-4 text-white" />
-                <span className="text-black text-sm font-medium">Resolution Rate: 94%</span>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-violet-50/20 to-indigo-50/30">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-7">
+
+          {/* ── Hero Header ──────────────────────────────────────────────── */}
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-violet-700 via-indigo-700 to-blue-800 p-8 shadow-2xl">
+            {/* Decorative blobs */}
+            <div className="absolute -top-12 -right-12 w-48 h-48 bg-white/5 rounded-full blur-2xl" />
+            <div className="absolute -bottom-16 -left-8 w-64 h-64 bg-white/5 rounded-full blur-3xl" />
+            <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-r from-transparent to-black/10" />
+
+            <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div>
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-11 h-11 bg-white/15 backdrop-blur rounded-2xl flex items-center justify-center shadow-inner">
+                    <MessageCircle className="w-6 h-6 text-white" />
+                  </div>
+                  <span className="text-violet-200 text-sm font-semibold tracking-widest uppercase">Support Hub</span>
+                </div>
+                <h1 className="text-4xl md:text-5xl font-extrabold text-white tracking-tight leading-tight">
+                  Complaints <span className="text-violet-300">Center</span>
+                </h1>
+                <p className="text-violet-200 mt-2 text-base">Track, manage and resolve customer complaints with speed.</p>
               </div>
+
+              {/* Live stats strip */}
+              {stats && (
+                <div className="flex gap-3 flex-wrap">
+                  {[
+                    { label: 'Open', value: stats.open, color: 'bg-rose-500/80' },
+                    { label: 'In Progress', value: stats.inProgress, color: 'bg-amber-400/80' },
+                    { label: 'Resolved', value: stats.resolved, color: 'bg-emerald-500/80' },
+                  ].map(s => (
+                    <div key={s.label} className="bg-white/10 backdrop-blur-sm rounded-2xl px-5 py-3 flex flex-col items-center border border-white/10">
+                      <div className={`w-2 h-2 rounded-full ${s.color} mb-1`} />
+                      <span className="text-2xl font-extrabold text-white">{s.value}</span>
+                      <span className="text-xs text-violet-200 font-medium">{s.label}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Resolution rate bar */}
+            {stats && (
+              <div className="relative mt-6">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-violet-200 font-medium flex items-center gap-1.5">
+                    <TrendingUp className="w-4 h-4" /> Resolution Rate
+                  </span>
+                  <span className="text-sm font-bold text-white">
+                    {stats.total > 0 ? Math.round(((stats.resolved + stats.closed) / stats.total) * 100) : 0}%
+                  </span>
+                </div>
+                <div className="h-1.5 bg-white/20 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-emerald-400 to-teal-300 rounded-full transition-all duration-700"
+                    style={{ width: stats.total > 0 ? `${Math.round(((stats.resolved + stats.closed) / stats.total) * 100)}%` : '0%' }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── KPI Cards ────────────────────────────────────────────────── */}
+          {stats && (
+            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
+              <KpiCard icon={<BarChart2 className="w-5 h-5 text-violet-600" />} label="Total" value={stats.total} sub="all time" colorClass="text-violet-700" />
+              <KpiCard icon={<Inbox className="w-5 h-5 text-rose-600" />} label="Open" value={stats.open} sub="needs action" colorClass="text-rose-600" pulse={stats.open > 10} />
+              <KpiCard icon={<Clock className="w-5 h-5 text-amber-600" />} label="In Progress" value={stats.inProgress} sub="being resolved" colorClass="text-amber-600" />
+              <KpiCard icon={<CheckCircle className="w-5 h-5 text-emerald-600" />} label="Resolved" value={stats.resolved} sub="completed" colorClass="text-emerald-600" />
+              <KpiCard icon={<ShieldCheck className="w-5 h-5 text-slate-500" />} label="Closed" value={stats.closed} sub="archived" colorClass="text-slate-500" />
+              <KpiCard icon={<Zap className="w-5 h-5 text-red-600" />} label="Urgent" value={stats.urgent} sub="critical" colorClass="text-red-600" pulse={stats.urgent > 5} />
+              <KpiCard icon={<AlertCircle className="w-5 h-5 text-orange-600" />} label="High" value={stats.high} sub="important" colorClass="text-orange-600" />
+            </div>
+          )}
+
+          {/* ── Filter Bar ───────────────────────────────────────────────── */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+            <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center">
+              {/* Search */}
+              <div className="relative flex-1 min-w-0">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Search by client name, email or subject…"
+                  className="w-full pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent bg-slate-50 placeholder-slate-400 transition"
+                />
+              </div>
+
+              {/* Status pills */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs text-slate-400 font-semibold flex items-center gap-1"><Filter className="w-3 h-3" />Status:</span>
+                {['', 'open', 'in-progress', 'resolved', 'closed'].map(s => (
+                  <FilterPill key={s} label={s === '' ? 'All' : STATUS_CFG[s as Status]?.label ?? s} active={statusFilter === s} onClick={() => { setStatusFilter(s); setPage(1) }} />
+                ))}
+              </div>
+
+              {/* Priority pills */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs text-slate-400 font-semibold flex items-center gap-1"><Tag className="w-3 h-3" />Priority:</span>
+                {['', 'urgent', 'high', 'medium', 'low'].map(p => (
+                  <FilterPill key={p} label={p === '' ? 'All' : PRIORITY_CFG[p as Priority]?.label ?? p} active={priorityFilter === p} onClick={() => { setPriorityFilter(p); setPage(1) }} />
+                ))}
+              </div>
+
+              {/* Clear */}
+              {hasFilters && (
+                <button onClick={clearFilters} className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-500 hover:text-rose-600 border border-slate-200 hover:border-rose-200 rounded-xl transition-all bg-white">
+                  <X className="w-3 h-3" /> Clear
+                </button>
+              )}
             </div>
           </div>
-          <div className="hidden md:block">
-            <MessageCircle className="h-24 w-24 text-white opacity-30" />
+
+          {/* ── Complaints Table ─────────────────────────────────────────── */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            {/* Table head */}
+            <div className="grid grid-cols-[2fr_2fr_1fr_1fr_1fr_1fr_auto] gap-3 px-6 py-3.5 bg-slate-50 border-b border-slate-100 text-xs font-bold text-slate-500 uppercase tracking-widest">
+              <span>Client</span>
+              <span>Subject</span>
+              <span>Priority</span>
+              <span>Category</span>
+              <span>Status</span>
+              <span>Date</span>
+              <span></span>
+            </div>
+
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-24 gap-4">
+                <div className="w-12 h-12 border-4 border-violet-200 border-t-violet-600 rounded-full animate-spin" />
+                <p className="text-slate-500 text-sm font-medium">Loading complaints…</p>
+              </div>
+            ) : complaints.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-24 gap-4">
+                <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center">
+                  <MessageCircle className="w-8 h-8 text-slate-300" />
+                </div>
+                <div className="text-center">
+                  <p className="text-slate-600 font-semibold">No complaints found</p>
+                  <p className="text-slate-400 text-sm mt-1">Try adjusting your filters or search query</p>
+                </div>
+                {hasFilters && (
+                  <button onClick={clearFilters} className="text-sm text-violet-600 font-semibold hover:underline">Clear all filters</button>
+                )}
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-50">
+                {complaints.map((complaint) => {
+                  const status = complaint.status as Status
+                  const priority = complaint.priority as Priority
+                  const sc = STATUS_CFG[status] ?? STATUS_CFG.open
+                  const age = complaint.ageInDays ?? 0
+                  return (
+                    <div
+                      key={complaint._id}
+                      className="grid grid-cols-[2fr_2fr_1fr_1fr_1fr_1fr_auto] gap-3 px-6 py-4 items-center hover:bg-violet-50/40 transition-all duration-150 group cursor-pointer"
+                      onClick={() => openDetail(complaint)}
+                    >
+                      {/* Client */}
+                      <div className="flex items-center gap-3 min-w-0">
+                        <Avatar name={complaint.clientName} />
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-800 truncate group-hover:text-violet-700 transition-colors">{complaint.clientName}</p>
+                          <p className="text-xs text-slate-400 truncate flex items-center gap-1"><Mail className="w-3 h-3 flex-shrink-0" />{complaint.clientEmail}</p>
+                          {complaint.invoiceNumber && (
+                            <span className="text-xs text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full mt-1 inline-block border border-violet-100">{complaint.invoiceNumber}</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Subject */}
+                      <p className="text-sm text-slate-700 font-medium truncate pr-2 group-hover:text-violet-700 transition-colors" title={complaint.subject}>
+                        {complaint.subject}
+                      </p>
+
+                      {/* Priority */}
+                      <PriorityBadge priority={priority} />
+
+                      {/* Category */}
+                      <span className="text-xs font-medium text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full capitalize">{complaint.category}</span>
+
+                      {/* Status */}
+                      <StatusBadge status={status} />
+
+                      {/* Date */}
+                      <div className="space-y-1">
+                        <div className="text-xs text-slate-500 flex items-center gap-1">
+                          <Calendar className="w-3 h-3" />
+                          {new Date(complaint.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        </div>
+                        {age > 7 && (
+                          <span className="text-xs text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full border border-orange-100 flex items-center gap-1 w-fit">
+                            <Clock className="w-3 h-3" /> {age}d old
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Action */}
+                      <button
+                        onClick={e => { e.stopPropagation(); openDetail(complaint) }}
+                        className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-violet-700 bg-violet-50 border border-violet-200 rounded-xl hover:bg-violet-600 hover:text-white hover:border-violet-600 transition-all duration-200 opacity-0 group-hover:opacity-100 whitespace-nowrap"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> View
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Pagination */}
+            {pagination.totalPages > 1 && (
+              <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50/60">
+                <p className="text-sm text-slate-500">
+                  Page <span className="font-bold text-slate-700">{pagination.currentPage}</span> of <span className="font-bold text-slate-700">{pagination.totalPages}</span>
+                  <span className="ml-2 text-slate-400">({pagination.totalCount} complaints)</span>
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setPage(p => p - 1)}
+                    disabled={!pagination.hasPrev}
+                    className="w-9 h-9 rounded-xl border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-violet-600 hover:text-white hover:border-violet-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  {Array.from({ length: Math.min(pagination.totalPages, 5) }, (_, i) => {
+                    const p = i + 1
+                    return (
+                      <button
+                        key={p}
+                        onClick={() => setPage(p)}
+                        className={`w-9 h-9 rounded-xl border text-sm font-semibold transition-all ${page === p ? 'bg-violet-600 text-white border-violet-600 shadow-md' : 'border-slate-200 text-slate-600 hover:border-violet-300 hover:text-violet-600'}`}
+                      >
+                        {p}
+                      </button>
+                    )
+                  })}
+                  <button
+                    onClick={() => setPage(p => p + 1)}
+                    disabled={!pagination.hasNext}
+                    className="w-9 h-9 rounded-xl border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-violet-600 hover:text-white hover:border-violet-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Enhanced Stats Cards with Animations */}
-      {stats && (
-        <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-7 gap-6">
-          <div className="transform transition-all duration-300 hover:scale-105 hover:shadow-xl">
-            <Card className="p-6 bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200 hover:shadow-blue-200">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-blue-600 uppercase tracking-wide">Total</p>
-                  <p className="text-3xl font-bold text-blue-900 animate-slideUp">{stats.total}</p>
-                  <div className="flex items-center mt-1">
-                    <ArrowUpRight className="h-3 w-3 text-green-500 mr-1" />
-                    <span className="text-xs text-green-600 font-medium">+12% this month</span>
-                  </div>
-                </div>
-                <div className="p-3 bg-blue-500 rounded-full shadow-lg">
-                  <MessageCircle className="h-6 w-6 text-white" />
-                </div>
-              </div>
-            </Card>
-          </div>
-          
-          <div className="transform transition-all duration-300 hover:scale-105 hover:shadow-xl">
-            <Card className={`p-6 bg-gradient-to-br from-red-50 to-red-100 border-red-200 hover:shadow-red-200 ${stats.open > 10 ? urgentPulse : ''}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-red-600 uppercase tracking-wide">Open</p>
-                  <p className="text-3xl font-bold text-red-900 animate-slideUp">{stats.open}</p>
-                  <div className="flex items-center mt-1">
-                    <ArrowDownRight className="h-3 w-3 text-red-500 mr-1" />
-                    <span className="text-xs text-red-600 font-medium">Needs attention</span>
-                  </div>
-                </div>
-                <div className="p-3 bg-red-500 rounded-full shadow-lg">
-                  <AlertCircle className="h-6 w-6 text-white" />
-                </div>
-              </div>
-            </Card>
-          </div>
-          
-          <div className="transform transition-all duration-300 hover:scale-105 hover:shadow-xl">
-            <Card className="p-6 bg-gradient-to-br from-yellow-50 to-yellow-100 border-yellow-200 hover:shadow-yellow-200">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-yellow-600 uppercase tracking-wide">In Progress</p>
-                  <p className="text-3xl font-bold text-yellow-900 animate-slideUp">{stats.inProgress}</p>
-                  <div className="flex items-center mt-1">
-                    <RefreshCw className="h-3 w-3 text-yellow-500 mr-1 animate-spin" />
-                    <span className="text-xs text-yellow-600 font-medium">Being resolved</span>
-                  </div>
-                </div>
-                <div className="p-3 bg-yellow-500 rounded-full shadow-lg">
-                  <Clock className="h-6 w-6 text-white" />
-                </div>
-              </div>
-            </Card>
-          </div>
-          
-          <div className="transform transition-all duration-300 hover:scale-105 hover:shadow-xl">
-            <Card className="p-6 bg-gradient-to-br from-green-50 to-green-100 border-green-200 hover:shadow-green-200">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-green-600 uppercase tracking-wide">Resolved</p>
-                  <p className="text-3xl font-bold text-green-900 animate-slideUp">{stats.resolved}</p>
-                  <div className="flex items-center mt-1">
-                    <ArrowUpRight className="h-3 w-3 text-green-500 mr-1" />
-                    <span className="text-xs text-green-600 font-medium">Great job!</span>
-                  </div>
-                </div>
-                <div className="p-3 bg-green-500 rounded-full shadow-lg">
-                  <CheckCircle className="h-6 w-6 text-white" />
-                </div>
-              </div>
-            </Card>
-          </div>
-          
-          <div className="transform transition-all duration-300 hover:scale-105 hover:shadow-xl">
-            <Card className="p-6 bg-gradient-to-br from-gray-50 to-gray-100 border-gray-200 hover:shadow-gray-200">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Closed</p>
-                  <p className="text-3xl font-bold text-gray-900 animate-slideUp">{stats.closed}</p>
-                  <div className="flex items-center mt-1">
-                    <CheckCircle className="h-3 w-3 text-gray-500 mr-1" />
-                    <span className="text-xs text-gray-600 font-medium">Completed</span>
-                  </div>
-                </div>
-                <div className="p-3 bg-gray-500 rounded-full shadow-lg">
-                  <Badge className="h-6 w-6 text-white" />
-                </div>
-              </div>
-            </Card>
-          </div>
-          
-          <div className="transform transition-all duration-300 hover:scale-105 hover:shadow-xl">
-            <Card className={`p-6 bg-gradient-to-br from-red-50 to-red-100 border-red-200 hover:shadow-red-200 ${stats.urgent > 5 ? urgentPulse : ''}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-red-600 uppercase tracking-wide">Urgent</p>
-                  <p className="text-3xl font-bold text-red-900 animate-slideUp">{stats.urgent}</p>
-                  <div className="flex items-center mt-1">
-                    <Zap className="h-3 w-3 text-red-500 mr-1" />
-                    <span className="text-xs text-red-600 font-medium">Critical</span>
-                  </div>
-                </div>
-                <div className="p-3 bg-red-500 rounded-full shadow-lg">
-                  <AlertCircle className="h-6 w-6 text-white" />
-                </div>
-              </div>
-            </Card>
-          </div>
-          
-          <div className="transform transition-all duration-300 hover:scale-105 hover:shadow-xl">
-            <Card className="p-6 bg-gradient-to-br from-orange-50 to-orange-100 border-orange-200 hover:shadow-orange-200">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-orange-600 uppercase tracking-wide">High Priority</p>
-                  <p className="text-3xl font-bold text-orange-900 animate-slideUp">{stats.high}</p>
-                  <div className="flex items-center mt-1">
-                    <AlertCircle className="h-3 w-3 text-orange-500 mr-1" />
-                    <span className="text-xs text-orange-600 font-medium">Important</span>
-                  </div>
-                </div>
-                <div className="p-3 bg-orange-500 rounded-full shadow-lg">
-                  <AlertCircle className="h-6 w-6 text-white" />
-                </div>
-              </div>
-            </Card>
-          </div>
-        </div>
-      )}
-
-      {/* Enhanced Filters with Modern Design */}
-      <Card className="p-6 bg-gradient-to-r from-white to-gray-50 border-0 shadow-xl">
-        <div className="flex items-center mb-4">
-          <Filter className="h-5 w-5 text-gray-600 mr-2" />
-          <h3 className="text-lg font-semibold text-gray-900">Smart Filters</h3>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          <div className="relative group">
-            <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
-            <Input
-              type="text"
-              placeholder="Search complaints..."
-              value={filters.search}
-              onChange={(e) => handleFilterChange('search', e.target.value)}
-              className="pl-10 border-gray-200 focus:border-blue-500 focus:ring-blue-500 transition-all duration-200"
-            />
-          </div>
-          
-          <Select
-            value={filters.status}
-            onChange={(e) => handleFilterChange('status', e.target.value)}
-            options={statusOptions}
-            placeholder="Filter by status"
-            className="border-gray-200 focus:border-blue-500 focus:ring-blue-500 transition-all duration-200"
-          />
-          
-          <Select
-            value={filters.priority}
-            onChange={(e) => handleFilterChange('priority', e.target.value)}
-            options={priorityOptions}
-            placeholder="Filter by priority"
-            className="border-gray-200 focus:border-blue-500 focus:ring-blue-500 transition-all duration-200"
-          />
-          
-          <Select
-            value={filters.category}
-            onChange={(e) => handleFilterChange('category', e.target.value)}
-            options={categoryOptions}
-            placeholder="Filter by category"
-            className="border-gray-200 focus:border-blue-500 focus:ring-blue-500 transition-all duration-200"
-          />
-          
-          <Button
-            onClick={() => setFilters({ search: '', status: '', priority: '', category: '', page: 1, limit: 20 })}
-            className="bg-gradient-to-r from-gray-500 to-gray-600 hover:from-gray-600 hover:to-gray-700 transform transition-all duration-200 hover:scale-105 shadow-lg"
-          >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Clear Filters
-          </Button>
-        </div>
-      </Card>
-
-      {/* Enhanced Complaints List */}
-      <Card className="overflow-hidden bg-white shadow-2xl border-0">
-        {loading ? (
-          <div className="p-12 text-center">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-blue-100 mb-4">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-            </div>
-            <p className="text-gray-600 text-lg">Loading complaints...</p>
-            <p className="text-gray-400 text-sm mt-1">Please wait while we fetch the data</p>
-          </div>
-        ) : complaints.length === 0 ? (
-          <div className="p-12 text-center">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-4">
-              <MessageCircle className="h-8 w-8 text-gray-400" />
-            </div>
-            <p className="text-gray-600 text-lg font-medium">No complaints found</p>
-            <p className="text-gray-400 text-sm mt-1">Try adjusting your filters or check back later</p>
-          </div>
-        ) : (
-          <>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
-                  <tr>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">
-                      Client
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">
-                      Subject
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">
-                      Priority
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">
-                      Category
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">
-                      Created
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-100">
-                  {complaints.map((complaint, index) => (
-                    <tr key={complaint._id} className="hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 transition-all duration-200 group animate-slideInUp" style={{animationDelay: `${index * 50}ms`}}>
-                      <td className="px-6 py-5 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <div className="flex-shrink-0 h-10 w-10">
-                            <div className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center shadow-lg">
-                              <User className="h-5 w-5 text-white" />
-                            </div>
-                          </div>
-                          <div className="ml-4">
-                            <div className="text-sm font-semibold text-gray-900 group-hover:text-blue-700 transition-colors">{complaint.clientName}</div>
-                            <div className="text-sm text-gray-500 flex items-center">
-                              <Mail className="h-3 w-3 mr-1" />
-                              {complaint.clientEmail}
-                            </div>
-                            {complaint.invoiceNumber && (
-                              <div className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full mt-1 inline-block">
-                                Invoice: {complaint.invoiceNumber}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-5">
-                        <div className="text-sm font-medium text-gray-900 max-w-xs truncate group-hover:text-blue-700 transition-colors" title={complaint.subject}>
-                          {complaint.subject}
-                        </div>
-                      </td>
-                      <td className="px-6 py-5 whitespace-nowrap">
-                        <span className={`inline-flex px-3 py-1 text-xs font-bold rounded-full shadow-sm ${priorityColors[complaint.priority]} ${complaint.priority === 'urgent' ? 'animate-pulse' : ''}`}>
-                          {complaint.priority === 'urgent' && <Zap className="h-3 w-3 mr-1" />}
-                          {complaint.priority.charAt(0).toUpperCase() + complaint.priority.slice(1)}
-                        </span>
-                      </td>
-                      <td className="px-6 py-5 whitespace-nowrap">
-                        <span className="text-sm text-gray-900 capitalize bg-gray-50 px-3 py-1 rounded-full">
-                          {complaint.category}
-                        </span>
-                      </td>
-                      <td className="px-6 py-5 whitespace-nowrap">
-                        <span className={`inline-flex px-3 py-1 text-xs font-bold rounded-full border shadow-sm ${statusColors[complaint.status]}`}>
-                          {complaint.status === 'in-progress' && <RefreshCw className="h-3 w-3 mr-1 animate-spin" />}
-                          {complaint.status.replace('-', ' ').charAt(0).toUpperCase() + complaint.status.replace('-', ' ').slice(1)}
-                        </span>
-                      </td>
-                      <td className="px-6 py-5 whitespace-nowrap">
-                        <div className="text-sm text-gray-600 flex items-center">
-                          <Calendar className="h-3 w-3 mr-1" />
-                          {new Date(complaint.createdAt).toLocaleDateString()}
-                        </div>
-                        {complaint.ageInDays && complaint.ageInDays > 7 && (
-                          <div className="text-xs text-orange-600 bg-orange-50 px-2 py-1 rounded-full mt-1 inline-flex items-center">
-                            <Clock className="h-3 w-3 mr-1" />
-                            {complaint.ageInDays} days old
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-6 py-5 whitespace-nowrap text-right text-sm font-medium">
-                        <Button
-                          onClick={() => openComplaintDetail(complaint)}
-                          className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-4 py-2 text-sm shadow-lg transform transition-all duration-200 hover:scale-105"
-                        >
-                          <Eye className="h-4 w-4 mr-1" />
-                          View Details
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Enhanced Pagination */}
-            {pagination.totalPages > 1 && (
-              <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-t border-gray-200">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1 flex justify-between sm:hidden">
-                    <Button
-                      onClick={() => handlePageChange(pagination.currentPage - 1)}
-                      disabled={!pagination.hasPrev}
-                      className="bg-gradient-to-r from-gray-300 to-gray-400 hover:from-gray-400 hover:to-gray-500 text-gray-700 shadow-lg disabled:opacity-50"
-                    >
-                      Previous
-                    </Button>
-                    <Button
-                      onClick={() => handlePageChange(pagination.currentPage + 1)}
-                      disabled={!pagination.hasNext}
-                      className="bg-gradient-to-r from-gray-300 to-gray-400 hover:from-gray-400 hover:to-gray-500 text-gray-700 shadow-lg disabled:opacity-50"
-                    >
-                      Next
-                    </Button>
-                  </div>
-                  <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-sm text-gray-700 bg-white px-4 py-2 rounded-full shadow-sm">
-                        Showing page <span className="font-bold text-blue-600">{pagination.currentPage}</span> of{' '}
-                        <span className="font-bold text-blue-600">{pagination.totalPages}</span>
-                        {' '}({pagination.totalCount} total complaints)
-                      </p>
-                    </div>
-                    <div>
-                      <nav className="relative z-0 inline-flex rounded-lg shadow-sm space-x-2">
-                        <Button
-                          onClick={() => handlePageChange(pagination.currentPage - 1)}
-                          disabled={!pagination.hasPrev}
-                          className="bg-gradient-to-r from-gray-300 to-gray-400 hover:from-gray-400 hover:to-gray-500 text-gray-700 shadow-lg disabled:opacity-50 transform transition-all duration-200 hover:scale-105"
-                        >
-                          Previous
-                        </Button>
-                        <Button
-                          onClick={() => handlePageChange(pagination.currentPage + 1)}
-                          disabled={!pagination.hasNext}
-                          className="bg-gradient-to-r from-gray-300 to-gray-400 hover:from-gray-400 hover:to-gray-500 text-gray-700 shadow-lg disabled:opacity-50 transform transition-all duration-200 hover:scale-105"
-                        >
-                          Next
-                        </Button>
-                      </nav>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </Card>
-
-      {/* Enhanced Complaint Detail Modal */}
-      {isDetailModalOpen && selectedComplaint && (
+      {/* ── Detail Drawer Modal ───────────────────────────────────────────── */}
+      {selectedComplaint && (
         <ComplaintDetailModal
           complaint={selectedComplaint}
-          onClose={() => setIsDetailModalOpen(false)}
-          onUpdate={updateComplaintStatus}
+          onClose={() => setSelectedComplaint(null)}
+          onUpdate={onUpdate}
         />
       )}
-    </div>
     </DashboardShell>
   )
 }
 
-// Enhanced Complaint Detail Modal Component
-function ComplaintDetailModal({ 
-  complaint, 
-  onClose, 
-  onUpdate 
-}: { 
-  complaint: Complaint, 
-  onClose: () => void,
+// ─── Detail Modal ─────────────────────────────────────────────────────────────
+function ComplaintDetailModal({
+  complaint,
+  onClose,
+  onUpdate,
+}: {
+  complaint: Complaint
+  onClose: () => void
   onUpdate: (id: string, status: string, resolution?: string, note?: string) => void
 }) {
-  const [newStatus, setNewStatus] = useState<'open' | 'in-progress' | 'resolved' | 'closed'>(complaint.status)
+  const [newStatus, setNewStatus] = useState<Status>(complaint.status as Status)
   const [resolution, setResolution] = useState(complaint.resolution || '')
   const [internalNote, setInternalNote] = useState('')
   const [isUpdating, setIsUpdating] = useState(false)
+  const [tab, setTab] = useState<'details' | 'notes'>('details')
+  const priority = complaint.priority as Priority
+  const pc = PRIORITY_CFG[priority] ?? PRIORITY_CFG.low
+  const sc = STATUS_CFG[newStatus] ?? STATUS_CFG.open
 
   const handleUpdate = async () => {
     setIsUpdating(true)
     try {
       await onUpdate(complaint._id, newStatus, resolution, internalNote)
       onClose()
-    } catch (error) {
-      console.error('Error updating complaint:', error)
     } finally {
       setIsUpdating(false)
     }
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-60 overflow-y-auto h-full w-full z-50 backdrop-blur-sm animate-fadeIn">
-      <div className="relative top-8 mx-auto p-0 border-0 w-11/12 max-w-5xl shadow-2xl rounded-2xl bg-white animate-slideInUp">
-        {/* Enhanced Modal Header */}
-        <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-6 rounded-t-2xl">
-          <div className="flex justify-between items-start">
-            <div>
-              <h3 className="text-2xl font-bold text-white mb-1">Complaint Details</h3>
-              <p className="text-blue-100">Comprehensive view and management</p>
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      {/* Backdrop */}
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+
+      {/* Panel — slides in from right */}
+      <div className="relative ml-auto mr-0 min-h-full w-full max-w-2xl bg-white shadow-2xl flex flex-col">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-violet-700 to-indigo-700 px-7 py-6">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-white/15 rounded-xl flex items-center justify-center">
+                <MessageCircle className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <p className="text-violet-200 text-xs font-semibold uppercase tracking-widest">Complaint #{complaint._id.slice(-6).toUpperCase()}</p>
+                <h2 className="text-white font-bold text-lg leading-snug max-w-sm truncate">{complaint.subject}</h2>
+              </div>
             </div>
             <button
               onClick={onClose}
-              className="text-white hover:text-gray-200 p-2 rounded-full hover:bg-white hover:bg-opacity-20 transition-all duration-200"
+              className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/25 flex items-center justify-center text-white transition-all"
             >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-              </svg>
+              <X className="w-4 h-4" />
             </button>
+          </div>
+
+          {/* Quick badges */}
+          <div className="flex gap-2 mt-4 flex-wrap">
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-white/20 text-white border border-white/20`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${pc.dot}`} /> {pc.label} Priority
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-white/20 text-white border border-white/20 capitalize">
+              <Tag className="w-3 h-3" /> {complaint.category}
+            </span>
+            {complaint.ageInDays && complaint.ageInDays > 0 && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-white/20 text-white border border-white/20">
+                <Clock className="w-3 h-3" /> {complaint.ageInDays} days old
+              </span>
+            )}
           </div>
         </div>
 
-        <div className="p-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left Column - Client & Complaint Info */}
-            <div className="lg:col-span-2 space-y-6">
-              {/* Client Information Card */}
-              <Card className="p-6 bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200 shadow-lg">
-                <h4 className="font-bold text-gray-900 mb-4 flex items-center gap-3 text-lg">
-                  <div className="p-2 bg-blue-500 rounded-lg shadow-md">
-                    <User className="h-5 w-5 text-white" />
-                  </div>
-                  Client Information
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-3 p-3 bg-white rounded-lg shadow-sm">
-                      <User className="h-4 w-4 text-blue-500" />
-                      <div>
-                        <p className="text-xs text-gray-500 font-medium uppercase">Name</p>
-                        <p className="text-sm font-semibold text-gray-900">{complaint.clientName}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-white rounded-lg shadow-sm">
-                      <Mail className="h-4 w-4 text-green-500" />
-                      <div>
-                        <p className="text-xs text-gray-500 font-medium uppercase">Email</p>
-                        <p className="text-sm font-semibold text-gray-900">{complaint.clientEmail}</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-3">
-                    {complaint.clientPhone && (
-                      <div className="flex items-center gap-3 p-3 bg-white rounded-lg shadow-sm">
-                        <Phone className="h-4 w-4 text-purple-500" />
-                        <div>
-                          <p className="text-xs text-gray-500 font-medium uppercase">Phone</p>
-                          <p className="text-sm font-semibold text-gray-900">{complaint.clientPhone}</p>
-                        </div>
-                      </div>
-                    )}
-                    {complaint.invoiceNumber && (
-                      <div className="flex items-center gap-3 p-3 bg-white rounded-lg shadow-sm">
-                        <FileText className="h-4 w-4 text-orange-500" />
-                        <div>
-                          <p className="text-xs text-gray-500 font-medium uppercase">Invoice</p>
-                          <p className="text-sm font-semibold text-blue-600">{complaint.invoiceNumber}</p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </Card>
+        {/* Tabs */}
+        <div className="flex border-b border-slate-100 bg-slate-50">
+          {['details', 'notes'].map(t => (
+            <button
+              key={t}
+              onClick={() => setTab(t as any)}
+              className={`flex-1 py-3.5 text-sm font-semibold capitalize transition-all border-b-2 ${tab === t ? 'border-violet-600 text-violet-700 bg-white' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+            >
+              {t === 'details' ? '📋 Details' : `💬 Notes ${complaint.internalNotes?.length ? `(${complaint.internalNotes.length})` : ''}`}
+            </button>
+          ))}
+        </div>
 
-              {/* Complaint Details Card */}
-              <Card className="p-6 bg-gradient-to-br from-gray-50 to-gray-100 border-gray-200 shadow-lg">
-                <h4 className="font-bold text-gray-900 mb-4 flex items-center gap-3 text-lg">
-                  <div className="p-2 bg-gray-600 rounded-lg shadow-md">
-                    <FileText className="h-5 w-5 text-white" />
-                  </div>
-                  Complaint Details
-                </h4>
-                <div className="space-y-4">
-                  <div className="p-4 bg-white rounded-lg shadow-sm">
-                    <p className="text-xs text-gray-500 font-medium uppercase mb-1">Subject</p>
-                    <p className="text-lg font-semibold text-gray-900">{complaint.subject}</p>
-                  </div>
-                  
-                  <div className="p-4 bg-white rounded-lg shadow-sm">
-                    <p className="text-xs text-gray-500 font-medium uppercase mb-2">Description</p>
-                    <div className="bg-gray-50 p-4 rounded-lg border-l-4 border-blue-500">
-                      <p className="text-gray-800 leading-relaxed">{complaint.description}</p>
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="p-4 bg-white rounded-lg shadow-sm text-center">
-                      <p className="text-xs text-gray-500 font-medium uppercase mb-2">Priority</p>
-                      <span className={`inline-flex px-3 py-1 text-sm font-bold rounded-full ${priorityColors[complaint.priority]}`}>
-                        {complaint.priority === 'urgent' && <Zap className="h-4 w-4 mr-1" />}
-                        {complaint.priority.charAt(0).toUpperCase() + complaint.priority.slice(1)}
-                      </span>
-                    </div>
-                    
-                    <div className="p-4 bg-white rounded-lg shadow-sm text-center">
-                      <p className="text-xs text-gray-500 font-medium uppercase mb-2">Category</p>
-                      <span className="inline-flex px-3 py-1 text-sm font-semibold bg-gray-100 text-gray-800 rounded-full capitalize">
-                        {complaint.category}
-                      </span>
-                    </div>
-                    
-                    <div className="p-4 bg-white rounded-lg shadow-sm text-center">
-                      <p className="text-xs text-gray-500 font-medium uppercase mb-2">Created</p>
-                      <div className="flex items-center justify-center gap-1 text-sm text-gray-700">
-                        <Calendar className="h-4 w-4" />
-                        {new Date(complaint.createdAt).toLocaleDateString()}
-                      </div>
-                    </div>
-                  </div>
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-5">
+          {tab === 'details' ? (
+            <>
+              {/* Client card */}
+              <div className="rounded-2xl border border-slate-100 overflow-hidden">
+                <div className="bg-slate-50 px-5 py-3 border-b border-slate-100 flex items-center gap-2">
+                  <User className="w-4 h-4 text-violet-500" />
+                  <span className="text-sm font-bold text-slate-700">Client Information</span>
                 </div>
-              </Card>
-            </div>
+                <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <InfoRow icon={<User className="w-4 h-4 text-violet-500" />} label="Name" value={complaint.clientName} />
+                  <InfoRow icon={<Mail className="w-4 h-4 text-blue-500" />} label="Email" value={complaint.clientEmail} />
+                  {complaint.clientPhone && <InfoRow icon={<Phone className="w-4 h-4 text-green-500" />} label="Phone" value={complaint.clientPhone} />}
+                  {complaint.invoiceNumber && <InfoRow icon={<FileText className="w-4 h-4 text-orange-500" />} label="Invoice" value={complaint.invoiceNumber} highlight />}
+                </div>
+              </div>
 
-            {/* Right Column - Status & Actions */}
-            <div className="space-y-6">
-              {/* Status Update Card */}
-              <Card className="p-6 bg-gradient-to-br from-green-50 to-emerald-50 border-green-200 shadow-lg">
-                <h4 className="font-bold text-gray-900 mb-4 flex items-center gap-3 text-lg">
-                  <div className="p-2 bg-green-500 rounded-lg shadow-md">
-                    <RefreshCw className="h-5 w-5 text-white" />
-                  </div>
-                  Update Status
-                </h4>
-                <div className="space-y-4">
+              {/* Complaint body */}
+              <div className="rounded-2xl border border-slate-100 overflow-hidden">
+                <div className="bg-slate-50 px-5 py-3 border-b border-slate-100 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-slate-500" />
+                  <span className="text-sm font-bold text-slate-700">Complaint Details</span>
+                </div>
+                <div className="p-5 space-y-4">
                   <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Current Status</label>
-                    <select
-                      value={newStatus}
-                      onChange={(e) => setNewStatus(e.target.value as 'open' | 'in-progress' | 'resolved' | 'closed')}
-                      className="block w-full px-4 py-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 shadow-sm"
-                    >
-                      <option value="open">🔴 Open</option>
-                      <option value="in-progress">🟡 In Progress</option>
-                      <option value="resolved">🟢 Resolved</option>
-                      <option value="closed">⚫ Closed</option>
-                    </select>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Subject</p>
+                    <p className="text-base font-semibold text-slate-800">{complaint.subject}</p>
                   </div>
-                  
+                  <div>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Description</p>
+                    <div className="bg-slate-50 rounded-xl p-4 border-l-4 border-violet-400 text-sm text-slate-700 leading-relaxed">
+                      {complaint.description}
+                    </div>
+                  </div>
+                  {complaint.resolution && (
+                    <div>
+                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Resolution</p>
+                      <div className="bg-emerald-50 rounded-xl p-4 border-l-4 border-emerald-400 text-sm text-emerald-800 leading-relaxed">
+                        {complaint.resolution}
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <Calendar className="w-3.5 h-3.5" />
+                    {new Date(complaint.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Status update */}
+              <div className="rounded-2xl border border-slate-100 overflow-hidden">
+                <div className="bg-slate-50 px-5 py-3 border-b border-slate-100 flex items-center gap-2">
+                  <RefreshCw className="w-4 h-4 text-emerald-500" />
+                  <span className="text-sm font-bold text-slate-700">Update Status</span>
+                </div>
+                <div className="p-5 space-y-4">
+                  {/* Status selector styled as pill group */}
+                  <div>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">New Status</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(['open', 'in-progress', 'resolved', 'closed'] as Status[]).map(s => {
+                        const c = STATUS_CFG[s]
+                        return (
+                          <button
+                            key={s}
+                            onClick={() => setNewStatus(s)}
+                            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-semibold transition-all ${newStatus === s ? `${c.badge} border-current ring-2 ring-offset-1 ring-current/30 shadow-sm` : 'border-slate-200 text-slate-500 hover:border-slate-300 bg-white'}`}
+                          >
+                            <span className={`w-2 h-2 rounded-full ${c.dot}`} />
+                            {c.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
                   {(newStatus === 'resolved' || newStatus === 'closed') && (
-                    <div className="animate-slideInUp">
-                      <label className="block text-sm font-bold text-gray-700 mb-2">Resolution Details</label>
+                    <div>
+                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Resolution Details <span className="text-rose-400">*</span></p>
                       <textarea
                         value={resolution}
-                        onChange={(e) => setResolution(e.target.value)}
-                        className="block w-full px-4 py-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 shadow-sm"
-                        rows={4}
-                        placeholder="Describe how this complaint was resolved..."
+                        onChange={e => setResolution(e.target.value)}
+                        rows={3}
+                        placeholder="Describe how this complaint was resolved…"
+                        className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent resize-none bg-slate-50 placeholder-slate-400"
                       />
                     </div>
                   )}
-                  
+
                   <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Internal Note</label>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Internal Note <span className="text-slate-300">(optional)</span></p>
                     <textarea
                       value={internalNote}
-                      onChange={(e) => setInternalNote(e.target.value)}
-                      className="block w-full px-4 py-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 shadow-sm"
-                      rows={3}
-                      placeholder="Add an internal note (optional)..."
+                      onChange={e => setInternalNote(e.target.value)}
+                      rows={2}
+                      placeholder="Add a private note visible only to your team…"
+                      className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent resize-none bg-slate-50 placeholder-slate-400"
                     />
                   </div>
-                  
-                  <Button
-                    onClick={handleUpdate}
-                    disabled={isUpdating}
-                    className="w-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white py-3 font-semibold shadow-lg transform transition-all duration-200 hover:scale-105 disabled:opacity-50"
-                  >
-                    {isUpdating ? (
-                      <div className="flex items-center justify-center gap-2">
-                        <RefreshCw className="h-4 w-4 animate-spin" />
-                        Updating...
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-center gap-2">
-                        <CheckCircle className="h-4 w-4" />
-                        Update Complaint
-                      </div>
-                    )}
-                  </Button>
                 </div>
-              </Card>
-
-              {/* Internal Notes History */}
-              {complaint.internalNotes && complaint.internalNotes.length > 0 && (
-                <Card className="p-6 bg-gradient-to-br from-purple-50 to-indigo-50 border-purple-200 shadow-lg">
-                  <h4 className="font-bold text-gray-900 mb-4 flex items-center gap-3 text-lg">
-                    <div className="p-2 bg-purple-500 rounded-lg shadow-md">
-                      <MessageSquare className="h-5 w-5 text-white" />
-                    </div>
-                    Internal Notes History
-                  </h4>
-                  <div className="space-y-3 max-h-64 overflow-y-auto custom-scrollbar">
-                    {complaint.internalNotes.map((note, index) => (
-                      <div key={index} className="bg-white p-4 rounded-lg shadow-sm border-l-4 border-purple-400 animate-slideInUp" style={{animationDelay: `${index * 100}ms`}}>
-                        <div className="text-sm text-gray-800 mb-2 leading-relaxed">{note.note}</div>
-                        <div className="flex items-center gap-2 text-xs text-gray-500">
-                          <div className="flex items-center gap-1">
-                            <User className="h-3 w-3" />
-                            <span className="font-medium">{note.addedBy.fullName}</span>
-                          </div>
-                          <span>•</span>
-                          <div className="flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            <span>{new Date(note.addedAt).toLocaleString()}</span>
-                          </div>
+              </div>
+            </>
+          ) : (
+            /* Notes tab */
+            <div className="space-y-3">
+              {complaint.internalNotes && complaint.internalNotes.length > 0 ? (
+                complaint.internalNotes.map((note, i) => (
+                  <div key={i} className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
+                    <div className="flex items-start gap-3">
+                      <Avatar name={note.addedBy?.fullName ?? 'Team'} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <p className="text-sm font-semibold text-slate-800">{note.addedBy?.fullName ?? 'Team'}</p>
+                          <p className="text-xs text-slate-400 whitespace-nowrap">{new Date(note.addedAt).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}</p>
                         </div>
+                        <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 rounded-xl p-3 border-l-4 border-violet-300">{note.note}</p>
                       </div>
-                    ))}
+                    </div>
                   </div>
-                </Card>
+                ))
+              ) : (
+                <div className="text-center py-16">
+                  <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                    <MessageSquare className="w-7 h-7 text-slate-300" />
+                  </div>
+                  <p className="text-slate-500 font-medium">No internal notes yet</p>
+                  <p className="text-slate-400 text-sm mt-1">Switch to Details to add the first note.</p>
+                </div>
               )}
             </div>
-          </div>
+          )}
+        </div>
+
+        {/* Footer CTA */}
+        <div className="border-t border-slate-100 px-6 py-4 bg-white flex items-center gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2.5 text-sm font-semibold text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 transition-all"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleUpdate}
+            disabled={isUpdating}
+            className="flex-[2] py-2.5 text-sm font-bold text-white bg-gradient-to-r from-violet-600 to-indigo-600 rounded-xl shadow-lg shadow-violet-200 hover:from-violet-700 hover:to-indigo-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {isUpdating ? <><RefreshCw className="w-4 h-4 animate-spin" /> Saving…</> : <><CheckCircle className="w-4 h-4" /> Save Changes</>}
+          </button>
         </div>
       </div>
-      
-      {/* Custom CSS for animations */}
-      <style jsx>{`
-        .animate-fadeIn {
-          animation: fadeIn 0.3s ease-out;
-        }
-        
-        .animate-slideInUp {
-          animation: slideInUp 0.4s ease-out;
-        }
-        
-        .animate-slideUp {
-          animation: slideUp 0.6s ease-out;
-        }
-        
-        .animate-float {
-          animation: float 3s ease-in-out infinite;
-        }
-        
-        .animate-float-delayed {
-          animation: float 3s ease-in-out infinite;
-          animation-delay: 1.5s;
-        }
-        
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 4px;
-        }
-        
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: #f1f1f1;
-          border-radius: 2px;
-        }
-        
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: #c1c1c1;
-          border-radius: 2px;
-        }
-        
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #a8a8a8;
-        }
-        
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        
-        @keyframes slideInUp {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        
-        @keyframes slideUp {
-          from {
-            opacity: 0;
-            transform: translateY(10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        
-        @keyframes float {
-          0%, 100% {
-            transform: translateY(0px);
-          }
-          50% {
-            transform: translateY(-10px);
-          }
-        }
-      `}</style>
+    </div>
+  )
+}
+
+// ─── InfoRow helper ───────────────────────────────────────────────────────────
+function InfoRow({ icon, label, value, highlight = false }: { icon: React.ReactNode; label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="w-8 h-8 bg-slate-50 rounded-lg flex items-center justify-center flex-shrink-0 border border-slate-100">{icon}</div>
+      <div className="min-w-0">
+        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">{label}</p>
+        <p className={`text-sm font-semibold truncate ${highlight ? 'text-violet-600' : 'text-slate-800'}`}>{value}</p>
+      </div>
     </div>
   )
 }
