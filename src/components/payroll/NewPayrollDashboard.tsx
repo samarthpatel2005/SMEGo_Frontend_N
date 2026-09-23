@@ -2,7 +2,7 @@
 
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
-import { EmployeeWithPayroll, newPayrollService } from '@/services/newPayrollService'
+import { EmployeeWithPayroll, SalaryStructure, newPayrollService } from '@/services/newPayrollService'
 import { loadRazorpayScript } from '@/lib/razorpay'
 import React, { useEffect, useState } from 'react'
 
@@ -18,27 +18,52 @@ const NewPayrollDashboard = () => {
   const [loading, setLoading] = useState(false)
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear())
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1)
+  const [periodMode, setPeriodMode] = useState<'month' | 'custom'>('month')
+  const [customStartDate, setCustomStartDate] = useState('')
+  const [customEndDate, setCustomEndDate] = useState('')
   const [selectedEmployees, setSelectedEmployees] = useState<Set<string>>(new Set())
   const [searchTerm, setSearchTerm] = useState('')
   const [paymentProcessing, setPaymentProcessing] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [selectedEmployeeForPayment, setSelectedEmployeeForPayment] = useState<EmployeeWithPayroll | null>(null)
   const [customAmount, setCustomAmount] = useState<string>('')
+  const [showStructureModal, setShowStructureModal] = useState(false)
+  const [selectedEmployeeForStructure, setSelectedEmployeeForStructure] = useState<EmployeeWithPayroll | null>(null)
+  const [structureForm, setStructureForm] = useState<SalaryStructure>({
+    salaryType: 'monthly', salary: 0, hourlyRate: 0, bonus: 0, fixedDeduction: 0,
+    leaveDeductionPerDay: 0, halfDayDeductionPerDay: 0
+  })
+
+  useEffect(() => {
+    const monthStart = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-01`
+    const monthEnd = new Date(selectedYear, selectedMonth, 0).toISOString().slice(0, 10)
+    if (periodMode === 'month') {
+      setCustomStartDate(monthStart)
+      setCustomEndDate(monthEnd)
+    }
+  }, [selectedYear, selectedMonth, periodMode])
 
   useEffect(() => {
     fetchEmployees()
-  }, [selectedYear, selectedMonth])
+  }, [selectedYear, selectedMonth, periodMode, customStartDate, customEndDate])
 
   const fetchEmployees = async () => {
+    if (periodMode === 'custom' && (!customStartDate || !customEndDate)) return
     setLoading(true)
     try {
-      const data = await newPayrollService.getEmployeesForPayroll(selectedYear, selectedMonth)
+      const data = await newPayrollService.getEmployeesForPayroll({
+        year: selectedYear,
+        month: selectedMonth,
+        ...(periodMode === 'custom' && customStartDate && customEndDate
+          ? { startDate: customStartDate, endDate: customEndDate }
+          : {})
+      })
       if (data.success) {
         setEmployees(data.data.employees || [])
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching employees:', error)
-      alert('Failed to fetch employees')
+      alert(error?.message || 'Failed to fetch employees')
     } finally {
       setLoading(false)
     }
@@ -55,11 +80,11 @@ const NewPayrollDashboard = () => {
   }
 
   const handleSelectAll = () => {
-    if (selectedEmployees.size === filteredEmployees.length) {
+    const eligibleEmployees = filteredEmployees.filter(emp => !emp.hasExistingPayroll && emp.hasSalaryStructure)
+    if (selectedEmployees.size === eligibleEmployees.length) {
       setSelectedEmployees(new Set())
     } else {
-      const allIds = filteredEmployees
-        .filter(emp => !emp.hasExistingPayroll)
+      const allIds = eligibleEmployees
         .map(emp => emp.employee._id)
       setSelectedEmployees(new Set(allIds))
     }
@@ -76,6 +101,7 @@ const NewPayrollDashboard = () => {
       const data = await newPayrollService.generatePayrollForEmployees({
         year: selectedYear,
         month: selectedMonth,
+        ...(periodMode === 'custom' ? { startDate: customStartDate, endDate: customEndDate } : {}),
         employeeIds: Array.from(selectedEmployees)
       })
 
@@ -95,9 +121,9 @@ const NewPayrollDashboard = () => {
   }
 
   const paySelectedEmployees = async () => {
-    const employeesWithPayroll = employees.filter(emp => 
-      selectedEmployees.has(emp.employee._id) && 
-      emp.hasExistingPayroll && 
+    const employeesWithPayroll = employees.filter(emp =>
+      selectedEmployees.has(emp.employee._id) &&
+      emp.hasExistingPayroll &&
       emp.payrollStatus === 'approved'
     )
 
@@ -113,7 +139,7 @@ const NewPayrollDashboard = () => {
     setPaymentProcessing(true)
     try {
       const data = await newPayrollService.createPayrollPayment({ payrollIds })
-      
+
       if (data.success) {
         // Load Razorpay script first
         const scriptLoaded = await loadRazorpayScript()
@@ -122,7 +148,7 @@ const NewPayrollDashboard = () => {
           setPaymentProcessing(false)
           return
         }
-        
+
         // Initialize Razorpay payment
         const options = {
           key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
@@ -133,19 +159,19 @@ const NewPayrollDashboard = () => {
           description: `Payroll payment for ${employeesWithPayroll.length} employees`,
           handler: async (response: any) => {
             console.log('Payment successful:', response)
-            
+
             // Update local state to show paid status for selected employees
-            setEmployees(prevEmployees => 
-              prevEmployees.map(emp => 
+            setEmployees(prevEmployees =>
+              prevEmployees.map(emp =>
                 selectedEmployees.has(emp.employee._id) && emp.hasExistingPayroll
                   ? { ...emp, payrollStatus: 'paid' }
                   : emp
               )
             )
-            
+
             alert('Payment completed successfully!')
             setSelectedEmployees(new Set())
-            
+
             // Note: The backend webhook will update the database status to 'paid'
             // No need to fetch employees immediately as the status is already updated locally
           },
@@ -178,7 +204,7 @@ const NewPayrollDashboard = () => {
 
   const resetPayrollStatus = async () => {
     const paidEmployees = employees.filter(emp => emp.payrollStatus === 'paid')
-    
+
     if (paidEmployees.length === 0) {
       alert('No paid payrolls to reset')
       return
@@ -218,16 +244,16 @@ const NewPayrollDashboard = () => {
     setPaymentProcessing(true)
     try {
       // Create a payment request with custom amount
-      const data = await newPayrollService.createPayrollPayment({ 
+      const data = await newPayrollService.createPayrollPayment({
         payrollIds: [selectedEmployeeForPayment.existingPayrollId!],
         customAmount: amount
       })
-      
+
       console.log('Payment creation response:', data)
-      
+
       if (data.success) {
         setShowPaymentModal(false)
-        
+
         // Load Razorpay script first
         const scriptLoaded = await loadRazorpayScript()
         if (!scriptLoaded) {
@@ -235,7 +261,7 @@ const NewPayrollDashboard = () => {
           setPaymentProcessing(false)
           return
         }
-        
+
         // Initialize Razorpay payment
         const options = {
           key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
@@ -246,20 +272,20 @@ const NewPayrollDashboard = () => {
           description: `Payroll payment for ${selectedEmployeeForPayment.employee.fullName}`,
           handler: async (response: any) => {
             console.log('Payment successful:', response)
-            
+
             // Update the local state to show PAID status immediately
-            setEmployees(prevEmployees => 
-              prevEmployees.map(emp => 
-                emp.employee._id === selectedEmployeeForPayment.employee._id 
+            setEmployees(prevEmployees =>
+              prevEmployees.map(emp =>
+                emp.employee._id === selectedEmployeeForPayment.employee._id
                   ? { ...emp, payrollStatus: 'paid' }
                   : emp
               )
             )
-            
+
             alert('Payment completed successfully!')
             setSelectedEmployeeForPayment(null)
             setCustomAmount('')
-            
+
             // Note: The backend webhook will update the database status to 'paid'
             // No need to fetch employees immediately as the status is already updated locally
           },
@@ -284,7 +310,7 @@ const NewPayrollDashboard = () => {
       }
     } catch (error: any) {
       console.error('Error creating payment:', error)
-      
+
       // Enhanced error logging to help debug
       if (error && typeof error === 'object') {
         console.error('Error details:', {
@@ -294,11 +320,11 @@ const NewPayrollDashboard = () => {
           stack: error.stack || 'No stack trace'
         })
       }
-      
+
       // Show more informative error message
-      const errorMessage = error?.response?.data?.message || 
-                          error?.message || 
-                          'Failed to create payment. Please check your connection and try again.'
+      const errorMessage = error?.response?.data?.message ||
+        error?.message ||
+        'Failed to create payment. Please check your connection and try again.'
       alert(errorMessage)
     } finally {
       setPaymentProcessing(false)
@@ -322,6 +348,10 @@ const NewPayrollDashboard = () => {
     return months[month - 1]
   }
 
+  const periodLabel = periodMode === 'custom'
+    ? `${customStartDate || 'Start date'} to ${customEndDate || 'End date'}`
+    : `${getMonthName(selectedMonth)} ${selectedYear}`
+
   const getStatusBadge = (status: string) => {
     const statusConfig: { [key: string]: { bg: string, text: string, icon: string } } = {
       not_generated: { bg: 'bg-slate-100', text: 'text-slate-700', icon: '⏳' },
@@ -329,15 +359,50 @@ const NewPayrollDashboard = () => {
       paid: { bg: 'bg-blue-100', text: 'text-blue-700', icon: '💰' },
       draft: { bg: 'bg-amber-100', text: 'text-amber-700', icon: '📝' }
     }
-    
+
     const config = statusConfig[status] || statusConfig.not_generated
-    
+
     return (
       <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold ${config.bg} ${config.text} border border-opacity-20`}>
         <span className="text-sm">{config.icon}</span>
         {status.replace('_', ' ').toUpperCase()}
       </span>
     )
+  }
+
+  const openStructureModal = (employee: EmployeeWithPayroll) => {
+    const structure = employee.employee.salaryStructure
+    const structureSalary = structure?.salary || employee.employee.salary || 0
+    const suggestedDailySalary = structureSalary / Math.max(employee.attendance.totalDays, 1)
+    const suggestedHourlyHalfDayDeduction = (structure?.hourlyRate || employee.employee.hourlyRate || 0) * 4
+    setSelectedEmployeeForStructure(employee)
+    setStructureForm({
+      salaryType: structure?.salaryType || 'monthly',
+      salary: structure?.salary || employee.employee.salary || 0,
+      hourlyRate: structure?.hourlyRate || employee.employee.hourlyRate || 0,
+      bonus: structure?.bonus || 0,
+      fixedDeduction: structure?.fixedDeduction || 0,
+      leaveDeductionPerDay: structure?.leaveDeductionPerDay ?? suggestedDailySalary,
+      halfDayDeductionPerDay: structure?.halfDayDeductionPerDay ?? (
+        (structure?.salaryType || 'monthly') === 'hourly'
+          ? suggestedHourlyHalfDayDeduction
+          : suggestedDailySalary * 0.5
+      )
+    })
+    setShowStructureModal(true)
+  }
+
+  const saveStructure = async () => {
+    if (!selectedEmployeeForStructure) return
+    try {
+      await newPayrollService.updateSalaryStructure(selectedEmployeeForStructure.employee._id, structureForm)
+      setShowStructureModal(false)
+      setSelectedEmployeeForStructure(null)
+      await fetchEmployees()
+      alert('Salary structure saved successfully')
+    } catch (error: any) {
+      alert(error?.message || 'Failed to save salary structure')
+    }
   }
 
   const filteredEmployees = employees.filter(emp =>
@@ -350,7 +415,6 @@ const NewPayrollDashboard = () => {
     const amount = emp.payrollData?.netSalary || emp.payrollData?.baseSalary || emp.employee.salary || 1000
     return sum + amount
   }, 0)
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
       <div className="max-w-7xl mx-auto p-6 space-y-8">
@@ -422,48 +486,66 @@ const NewPayrollDashboard = () => {
               </div>
               <h2 className="text-xl font-bold text-slate-800">Payroll Period</h2>
             </div>
-            
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <select
-                  value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
-                  className="appearance-none bg-white border-2 border-slate-200 rounded-xl px-4 py-3 pr-10 font-medium text-slate-700 hover:border-blue-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 transition-all duration-200 cursor-pointer"
-                >
-                  {Array.from({ length: 12 }, (_, i) => (
-                    <option key={i + 1} value={i + 1}>
-                      {getMonthName(i + 1)}
-                    </option>
-                  ))}
-                </select>
-                <div className="absolute inset-y-0 right-0 flex items-center px-3 pointer-events-none">
-                  <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </div>
-              
-              <div className="relative">
-                <select
-                  value={selectedYear}
-                  onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-                  className="appearance-none bg-white border-2 border-slate-200 rounded-xl px-4 py-3 pr-10 font-medium text-slate-700 hover:border-blue-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 transition-all duration-200 cursor-pointer"
-                >
-                  {Array.from({ length: 5 }, (_, i) => {
-                    const year = new Date().getFullYear() - 2 + i
-                    return (
-                      <option key={year} value={year}>
-                        {year}
+
+            <div className="flex flex-wrap items-center gap-4">
+              <select
+                value={periodMode}
+                onChange={(e) => setPeriodMode(e.target.value as 'month' | 'custom')}
+                className="bg-white border-2 border-slate-200 rounded-xl px-4 py-3 font-medium text-slate-700"
+              >
+                <option value="month">Monthly period</option>
+                <option value="custom">Custom dates</option>
+              </select>
+              {periodMode === 'custom' && <>
+                <label className="text-sm font-semibold text-slate-600">From
+                  <input type="date" value={customStartDate} onChange={(e) => setCustomStartDate(e.target.value)} className="ml-2 border-2 border-slate-200 rounded-xl px-3 py-3 font-medium text-slate-700" />
+                </label>
+                <label className="text-sm font-semibold text-slate-600">To
+                  <input type="date" value={customEndDate} min={customStartDate} onChange={(e) => setCustomEndDate(e.target.value)} className="ml-2 border-2 border-slate-200 rounded-xl px-3 py-3 font-medium text-slate-700" />
+                </label>
+              </>}
+              {periodMode === 'month' && <>
+                <div className="relative">
+                  <select
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
+                    className="appearance-none bg-white border-2 border-slate-200 rounded-xl px-4 py-3 pr-10 font-medium text-slate-700 hover:border-blue-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 transition-all duration-200 cursor-pointer"
+                  >
+                    {Array.from({ length: 12 }, (_, i) => (
+                      <option key={i + 1} value={i + 1}>
+                        {getMonthName(i + 1)}
                       </option>
-                    )
-                  })}
-                </select>
-                <div className="absolute inset-y-0 right-0 flex items-center px-3 pointer-events-none">
-                  <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
+                    ))}
+                  </select>
+                  <div className="absolute inset-y-0 right-0 flex items-center px-3 pointer-events-none">
+                    <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
                 </div>
-              </div>
+
+                <div className="relative">
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+                    className="appearance-none bg-white border-2 border-slate-200 rounded-xl px-4 py-3 pr-10 font-medium text-slate-700 hover:border-blue-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 transition-all duration-200 cursor-pointer"
+                  >
+                    {Array.from({ length: 5 }, (_, i) => {
+                      const year = new Date().getFullYear() - 2 + i
+                      return (
+                        <option key={year} value={year}>
+                          {year}
+                        </option>
+                      )
+                    })}
+                  </select>
+                  <div className="absolute inset-y-0 right-0 flex items-center px-3 pointer-events-none">
+                    <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
+              </>}
             </div>
           </div>
         </div>
@@ -546,10 +628,10 @@ const NewPayrollDashboard = () => {
               className="whitespace-nowrap font-semibold text-slate-700 border-slate-300 hover:bg-slate-50 hover:border-slate-400 transition-all duration-200 px-6 py-3 rounded-xl shadow-sm"
             >
               <span className="mr-2">
-                {selectedEmployees.size === filteredEmployees.filter(emp => !emp.hasExistingPayroll).length ? '❌' : '☑️'}
+                {selectedEmployees.size === filteredEmployees.filter(emp => !emp.hasExistingPayroll && emp.hasSalaryStructure).length ? '❌' : '☑️'}
               </span>
-              {selectedEmployees.size === filteredEmployees.filter(emp => !emp.hasExistingPayroll).length
-                ? 'Deselect All' 
+              {selectedEmployees.size === filteredEmployees.filter(emp => !emp.hasExistingPayroll && emp.hasSalaryStructure).length
+                ? 'Deselect All'
                 : 'Select All'}
             </Button>
           </div>
@@ -563,7 +645,7 @@ const NewPayrollDashboard = () => {
                 <span className="text-white text-sm font-bold">👨‍💼</span>
               </div>
               <h3 className="text-xl font-bold text-slate-800">
-                Employees for {getMonthName(selectedMonth)} {selectedYear}
+                Employees for {periodLabel}
               </h3>
               <span className="ml-auto px-3 py-1 bg-slate-200 text-slate-700 rounded-full text-sm font-medium">
                 {filteredEmployees.length} employees
@@ -591,7 +673,7 @@ const NewPayrollDashboard = () => {
                         <div className="flex items-center gap-3">
                           <input
                             type="checkbox"
-                            checked={selectedEmployees.size === filteredEmployees.filter(emp => !emp.hasExistingPayroll).length && filteredEmployees.filter(emp => !emp.hasExistingPayroll).length > 0}
+                            checked={selectedEmployees.size === filteredEmployees.filter(emp => !emp.hasExistingPayroll && emp.hasSalaryStructure).length && filteredEmployees.filter(emp => !emp.hasExistingPayroll && emp.hasSalaryStructure).length > 0}
                             onChange={handleSelectAll}
                             className="w-5 h-5 text-blue-600 border-2 border-slate-300 rounded-md focus:ring-blue-500 focus:ring-2 transition-all"
                           />
@@ -613,7 +695,7 @@ const NewPayrollDashboard = () => {
                             type="checkbox"
                             checked={selectedEmployees.has(emp.employee._id)}
                             onChange={() => handleSelectEmployee(emp.employee._id)}
-                            disabled={emp.hasExistingPayroll && emp.payrollStatus === 'paid'}
+                            disabled={!emp.hasSalaryStructure || (emp.hasExistingPayroll && emp.payrollStatus === 'paid')}
                             className="w-5 h-5 text-blue-600 border-2 border-slate-300 rounded-md focus:ring-blue-500 focus:ring-2 transition-all disabled:opacity-50"
                           />
                         </td>
@@ -636,21 +718,29 @@ const NewPayrollDashboard = () => {
                         </td>
                         <td className="py-4 px-6">
                           <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <div className="w-3 h-3 bg-emerald-500 rounded-full"></div>
-                              <span className="text-sm font-medium text-slate-700">
-                                {emp.attendance.presentDays}/{emp.attendance.totalDays} days
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-                              <span className="text-sm text-slate-600">{emp.attendance.totalHours}h worked</span>
-                            </div>
+                            {emp.employee.salaryStructure?.salaryType === 'hourly' ? (
+                              <>
+                                <div className="flex items-center gap-2">
+                                  <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                                  <span className="text-sm font-medium text-slate-700">{emp.attendance.totalHours}h worked</span>
+                                </div>
+                                <div className="text-xs text-slate-500">Regular: {emp.attendance.regularHours}h</div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="flex items-center gap-2">
+                                  <div className="w-3 h-3 bg-emerald-500 rounded-full"></div>
+                                  <span className="text-sm font-medium text-slate-700">{emp.attendance.presentDays} days worked</span>
+                                </div>
+                                <div className="text-xs text-slate-600">Half-days: {emp.attendance.halfDays}</div>
+                                <div className="text-xs text-slate-600">Absent: {emp.attendance.absentDays}</div>
+                              </>
+                            )}
                           </div>
                         </td>
                         <td className="py-4 px-6">
                           <div className="font-bold text-slate-800 text-lg">
-                            {formatCurrency(emp.employee.salary || (emp.employee.hourlyRate || 0) * emp.attendance.totalHours)}
+                            {formatCurrency(emp.payrollData?.baseSalary || emp.employee.salary || (emp.employee.hourlyRate || 0) * emp.attendance.totalHours)}
                           </div>
                         </td>
                         <td className="py-4 px-6">
@@ -659,30 +749,41 @@ const NewPayrollDashboard = () => {
                           </div>
                         </td>
                         <td className="py-4 px-6">
-                          {emp.payrollStatus === 'approved' ? (
+                          <div className="flex flex-col items-start gap-2">
                             <Button
                               size="sm"
-                              className="bg-gradient-to-r from-emerald-600 to-green-700 hover:from-emerald-700 hover:to-green-800 text-white px-6 py-2 rounded-xl font-semibold shadow-md hover:shadow-lg transition-all duration-200 group"
-                              onClick={() => {
-                                setSelectedEmployeeForPayment(emp)
-                                const defaultAmount = emp.payrollData?.netSalary || emp.payrollData?.baseSalary || emp.employee.salary || 1000
-                                setCustomAmount(defaultAmount.toString())
-                                setShowPaymentModal(true)
-                              }}
+                              variant="outline"
+                              onClick={() => openStructureModal(emp)}
+                              className="text-blue-700 border-blue-300 hover:bg-blue-50 rounded-xl"
                             >
-                              <span className="mr-2 group-hover:scale-110 transition-transform">💳</span>
-                              Pay Now
+                              {emp.hasSalaryStructure ? 'Edit Structure' : 'Set Structure'}
                             </Button>
-                          ) : emp.payrollStatus === 'paid' ? (
-                            <div className="flex items-center gap-2">
-                              <span className="px-4 py-2 rounded-xl text-sm font-bold bg-gradient-to-r from-emerald-100 to-green-100 text-emerald-700 border-2 border-emerald-200 shadow-sm">
-                                <span className="mr-2">✅</span>
-                                PAID
-                              </span>
-                            </div>
-                          ) : (
-                            getStatusBadge(emp.payrollStatus)
-                          )}
+                            {emp.payrollStatus === 'approved' ? (
+                              <Button
+                                size="sm"
+                                className="bg-gradient-to-r from-emerald-600 to-green-700 hover:from-emerald-700 hover:to-green-800 text-white px-6 py-2 rounded-xl font-semibold shadow-md hover:shadow-lg transition-all duration-200 group"
+                                onClick={() => {
+                                  setSelectedEmployeeForPayment(emp)
+                                  const defaultAmount = emp.payrollData?.netSalary || emp.payrollData?.baseSalary || emp.employee.salary || 1000
+                                  setCustomAmount(defaultAmount.toString())
+                                  setShowPaymentModal(true)
+                                }}
+                              >
+                                <span className="mr-2 group-hover:scale-110 transition-transform">💳</span>
+                                Pay Now
+                              </Button>
+                            ) : emp.payrollStatus === 'paid' ? (
+                              <div className="flex items-center gap-2">
+                                <span className="px-4 py-2 rounded-xl text-sm font-bold bg-gradient-to-r from-emerald-100 to-green-100 text-emerald-700 border-2 border-emerald-200 shadow-sm">
+                                  <span className="mr-2">✅</span>
+                                  PAID
+                                </span>
+                              </div>
+                            ) : (
+                              getStatusBadge(emp.payrollStatus)
+                            )}
+                            {!emp.hasSalaryStructure && <span className="text-xs text-amber-700 font-medium">Structure required</span>}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -742,7 +843,7 @@ const NewPayrollDashboard = () => {
                     </span>
                   </div>
                 </div>
-                
+
                 {/* Payment Amount Input */}
                 <div className="space-y-3">
                   <label className="block text-sm font-bold text-slate-700">
@@ -767,7 +868,7 @@ const NewPayrollDashboard = () => {
                   </p>
                 </div>
               </div>
-              
+
               {/* Modal Footer */}
               <div className="flex justify-end gap-3 p-6 bg-slate-50 rounded-b-2xl border-t border-slate-200">
                 <Button
@@ -798,6 +899,51 @@ const NewPayrollDashboard = () => {
                     </div>
                   )}
                 </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showStructureModal && selectedEmployeeForStructure && (
+          <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-slate-200">
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 border-b border-slate-200">
+                <h3 className="text-xl font-bold text-slate-800">
+                  {selectedEmployeeForStructure.hasSalaryStructure ? 'Edit' : 'Set'} Salary Structure
+                </h3>
+                <p className="text-sm text-slate-600 mt-1">{selectedEmployeeForStructure.employee.fullName}</p>
+              </div>
+              <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <label className="text-sm font-semibold text-slate-700">Pay type
+                  <select value={structureForm.salaryType} onChange={e => setStructureForm({ ...structureForm, salaryType: e.target.value as 'monthly' | 'hourly' })} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2">
+                    <option value="monthly">Monthly salary</option>
+                    <option value="hourly">Hourly salary</option>
+                  </select>
+                </label>
+                <label className="text-sm font-semibold text-slate-700">{structureForm.salaryType === 'monthly' ? 'Monthly salary' : 'Hourly rate'}
+                  <Input type="number" min="0" value={structureForm.salaryType === 'monthly' ? structureForm.salary : structureForm.hourlyRate} onChange={e => setStructureForm({ ...structureForm, [structureForm.salaryType === 'monthly' ? 'salary' : 'hourlyRate']: Number(e.target.value) })} className="mt-1" />
+                </label>
+                <label className="text-sm font-semibold text-slate-700">Bonus
+                  <Input type="number" min="0" value={structureForm.bonus} onChange={e => setStructureForm({ ...structureForm, bonus: Number(e.target.value) })} className="mt-1" />
+                </label>
+                <label className="text-sm font-semibold text-slate-700">Fixed deduction
+                  <Input type="number" min="0" value={structureForm.fixedDeduction} onChange={e => setStructureForm({ ...structureForm, fixedDeduction: Number(e.target.value) })} className="mt-1" />
+                </label>
+                {structureForm.salaryType === 'monthly' && <>
+                  <label className="text-sm font-semibold text-slate-700">Leave deduction per day
+                    <Input type="number" min="0" value={structureForm.leaveDeductionPerDay} onChange={e => setStructureForm({ ...structureForm, leaveDeductionPerDay: Number(e.target.value) })} className="mt-1" />
+                  </label>
+                  <label className="text-sm font-semibold text-slate-700">Half-day deduction
+                    <Input type="number" min="0" value={structureForm.halfDayDeductionPerDay} onChange={e => setStructureForm({ ...structureForm, halfDayDeductionPerDay: Number(e.target.value) })} className="mt-1" />
+                  </label>
+                </>}
+                <div className="sm:col-span-2 rounded-xl bg-blue-50 border border-blue-200 p-4 text-sm text-blue-900">
+                  Attendance suggestion: {selectedEmployeeForStructure.attendance.presentDays} present days, {selectedEmployeeForStructure.attendance.absentDays} absent days, and {selectedEmployeeForStructure.attendance.halfDays} half-days.
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 p-6 bg-slate-50 border-t border-slate-200">
+                <Button variant="outline" onClick={() => setShowStructureModal(false)}>Cancel</Button>
+                <Button onClick={saveStructure} className="bg-blue-600 text-white hover:bg-blue-700">Save Structure</Button>
               </div>
             </div>
           </div>
