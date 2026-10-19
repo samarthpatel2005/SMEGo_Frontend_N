@@ -124,7 +124,7 @@ const AdminAccountStep: React.FC<AdminAccountStepProps> = ({
           type="email"
           required
           value={data.workEmail}
-          onChange={(e) => handleChange('workEmail', e.target.value)}
+          onChange={(e) => handleChange('workEmail', e.target.value.trim().toLowerCase())}
           error={errors.workEmail}
           placeholder="john@company.com"
         />

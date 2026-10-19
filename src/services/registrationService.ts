@@ -1,9 +1,9 @@
 // Registration API service
 import {
-  OrganizationProfileData,
-  AdminAccountData,
-  PlanSelectionData,
-  RegistrationResponse
+    AdminAccountData,
+    OrganizationProfileData,
+    PlanSelectionData,
+    RegistrationResponse
 } from '@/types/registration'
 import { mockRegistrationService } from './mockRegistrationService'
 
@@ -124,7 +124,7 @@ class RegistrationService {
     const payload = {
       // Admin details
       fullName: adminData.fullName,
-      email: adminData.workEmail,
+      email: adminData.workEmail.trim().toLowerCase(),
       password: adminData.password,
       phone: adminData.phone,
       acceptedTerms: adminData.acceptTerms,
@@ -194,8 +194,8 @@ class RegistrationService {
 
       return result
     } catch (error) {
-      console.warn('❌ Organization and admin creation failed, falling back to mock service:', error)
-      return mockRegistrationService.createAdminAccount(adminData)
+      console.error('❌ Organization and admin creation failed:', error)
+      throw error
     }
   }
 
